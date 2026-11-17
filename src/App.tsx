@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -7,16 +7,21 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Cpu,
   Download,
+  Film,
+  KeyRound,
   Layers,
   MapPin,
   Plus,
   Rocket,
+  Send,
   ShoppingBag,
   Sparkles,
   Target,
   Trash2,
   TrendingUp,
+  Users,
 } from 'lucide-react';
 import {
   AdMetricInput,
@@ -24,11 +29,21 @@ import {
   PATH_META,
   PlannerInput,
   analyzeAdMetrics,
+  evaluateAuctionValue,
   formatBRL,
   generatePlan,
 } from './lib/trafficEngine';
+import { AudienceInputNode, DEFAULT_AUDIENCE_NODES } from './lib/audienceEngine';
+import { RuntimeStatus, initRuntime } from './lib/skillRuntime';
+import { ZernioConnectionStatus, zernio_verify_connection } from './lib/zernioClient';
+import { CreativeStudioTab } from './components/CreativeStudioTab';
+import { AudienceLadderTab } from './components/AudienceLadderTab';
+import { PreFlightCockpitTab } from './components/PreFlightCockpitTab';
+import { KnowledgeCenterTab } from './components/KnowledgeCenterTab';
+import { ZernioSettingsModal } from './components/ZernioSettingsModal';
+import { MetricTooltip } from './components/MetricTooltip';
 
-type Tab = 'planner' | 'analyzer' | 'playbooks';
+type Tab = 'planner' | 'creative' | 'audiences' | 'cockpit' | 'analyzer' | 'playbooks';
 
 const PATH_ICONS: Record<BusinessPath, typeof MapPin> = {
   local: MapPin,
@@ -48,6 +63,8 @@ const INITIAL_ADS: AdMetricInput[] = [
     linkClicks: 92,
     results: 8,
     targetCostPerResult: 18,
+    frequency: 1.8,
+    audienceTemp: 'cold',
   },
   {
     id: 'ad-2',
@@ -59,12 +76,21 @@ const INITIAL_ADS: AdMetricInput[] = [
     linkClicks: 14,
     results: 0,
     targetCostPerResult: 18,
+    frequency: 3.9,
+    audienceTemp: 'cold',
   },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('planner');
   const [copiedType, setCopiedType] = useState<'plan' | 'json' | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [zernioStatus, setZernioStatus] = useState<ZernioConnectionStatus | null>(null);
+  const [buyingMode, setBuyingMode] = useState<'ABO' | 'CBO'>('ABO');
+  const [audienceNodes, setAudienceNodes] = useState<AudienceInputNode[]>(
+    DEFAULT_AUDIENCE_NODES
+  );
 
   const [input, setInput] = useState<PlannerInput>({
     path: 'local',
@@ -88,6 +114,30 @@ export default function App() {
   const [ads, setAds] = useState<AdMetricInput[]>(INITIAL_ADS);
 
   const plan = useMemo(() => generatePlan(input), [input]);
+
+  const auctionScore = useMemo(
+    () =>
+      evaluateAuctionValue({
+        dailyBudget: input.dailyBudget,
+        hookRatePct: 28,
+        ctrPct: 1.4,
+        holdRatePct: 26,
+      }),
+    [input.dailyBudget]
+  );
+
+  useEffect(() => {
+    void refreshRuntime();
+  }, []);
+
+  async function refreshRuntime() {
+    const [rt, zStatus] = await Promise.all([
+      initRuntime(),
+      zernio_verify_connection(),
+    ]);
+    setRuntimeStatus(rt);
+    setZernioStatus(zStatus);
+  }
 
   function handleSelectPath(path: BusinessPath) {
     const meta = PATH_META[path];
@@ -195,40 +245,51 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="flex items-center gap-1 rounded-lg bg-zinc-900/90 p-1 ring-1 ring-zinc-800">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setActiveTab('planner')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                activeTab === 'planner'
-                  ? 'bg-emerald-500 text-zinc-950 shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-100'
-              }`}
+              onClick={() => setSettingsOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-emerald-500/50 hover:text-white"
+              title="Configurar Zernio Token (Web Crypto), Contas IndexedDB e Travas"
             >
-              <Layers className="h-3.5 w-3.5" />
-              Planejador
+              <Cpu className="h-3.5 w-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">
+                {runtimeStatus?.workerActive ? 'Worker Ativo' : 'Runtime Local'}
+              </span>
+              <span className="text-zinc-600">·</span>
+              <KeyRound className="h-3.5 w-3.5 text-amber-400" />
+              <span>
+                {zernioStatus?.mode === 'live' ? 'Zernio Live' : 'Zernio Sandbox'}
+              </span>
             </button>
-            <button
-              onClick={() => setActiveTab('analyzer')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                activeTab === 'analyzer'
-                  ? 'bg-emerald-500 text-zinc-950 shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-100'
-              }`}
-            >
-              <BarChart3 className="h-3.5 w-3.5" />
-              Analisador de Métricas
-            </button>
-            <button
-              onClick={() => setActiveTab('playbooks')}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
-                activeTab === 'playbooks'
-                  ? 'bg-emerald-500 text-zinc-950 shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-100'
-              }`}
-            >
-              <BookOpen className="h-3.5 w-3.5" />
-              Playbooks 2026
-            </button>
+          </div>
+        </div>
+
+        <div className="mx-auto max-w-7xl px-4 pb-3 sm:px-6">
+          <nav className="flex flex-wrap items-center gap-1 rounded-lg bg-zinc-900/90 p-1 ring-1 ring-zinc-800">
+            {[
+              { id: 'planner' as const, label: 'Construtor (ABO/CBO)', icon: Layers },
+              { id: 'creative' as const, label: 'Estúdio Criativo', icon: Film },
+              { id: 'audiences' as const, label: 'Escada 00–05', icon: Users },
+              { id: 'cockpit' as const, label: 'Cockpit Pré-Voo', icon: Send },
+              { id: 'analyzer' as const, label: 'Analisador', icon: BarChart3 },
+              { id: 'playbooks' as const, label: 'Central de Conhecimento', icon: BookOpen },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition ${
+                    activeTab === item.id
+                      ? 'bg-emerald-500 text-zinc-950 shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-100'
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {item.label}
+                </button>
+              );
+            })}
           </nav>
         </div>
       </header>
@@ -742,9 +803,92 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                {/* Pedido 21: Lógica de Orçamento ABO vs CBO & Equação do Leilão da Meta */}
+                <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+                    <div>
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
+                        Lógica de Orçamento (ABO vs. CBO) &amp; Equação do Leilão
+                      </h3>
+                      <p className="mt-0.5 text-[11px] text-zinc-400">
+                        Recomendado: 4 a 8 conjuntos ativos. Use ABO para testes paralelos e CBO para escala.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg bg-zinc-950 p-1 ring-1 ring-zinc-800">
+                      {(['ABO', 'CBO'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setBuyingMode(mode)}
+                          className={`rounded-md px-3 py-1 font-mono text-xs font-semibold transition ${
+                            buyingMode === mode
+                              ? 'bg-emerald-500 text-zinc-950'
+                              : 'text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3.5 text-xs">
+                      <div className="font-semibold text-white">
+                        {buyingMode === 'ABO'
+                          ? 'Modo ABO (Sandbox de Testes)'
+                          : 'Modo CBO (Advantage Campaign Budget · Escala)'}
+                      </div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
+                        {buyingMode === 'ABO'
+                          ? 'Distribui verba idêntica por conjunto em disputa, garantindo comparação estatística justa entre criativos e públicos.'
+                          : 'Concentra o orçamento na campanha para o algoritmo alocar em tempo real nos conjuntos com menor CPA.'}
+                      </p>
+                    </div>
+
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-white">
+                          Valor Total no Leilão (Meta)
+                        </span>
+                        <span className="font-mono text-xs font-semibold text-emerald-400">
+                          {auctionScore.totalValueScore}/100 · {auctionScore.competitivenessLabel}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 font-mono text-[10px] text-zinc-400">
+                        Valor = Lance ({auctionScore.bidContribution}) + Ação Est. ({auctionScore.estimatedActionContribution}) + Qualidade ({auctionScore.qualityContribution})
+                      </div>
+                      <p className="mt-1.5 text-[11px] text-zinc-300">{auctionScore.guidance}</p>
+                    </div>
+                  </div>
+                </div>
               </section>
             </div>
           </div>
+        )}
+
+        {activeTab === 'creative' && (
+          <CreativeStudioTab
+            defaultBusinessName={input.businessName}
+            defaultProductName={input.productName}
+          />
+        )}
+
+        {activeTab === 'audiences' && (
+          <AudienceLadderTab
+            nodes={audienceNodes}
+            onChangeNodes={setAudienceNodes}
+          />
+        )}
+
+        {activeTab === 'cockpit' && (
+          <PreFlightCockpitTab
+            businessName={input.businessName}
+            productName={input.productName}
+            buyingMode={buyingMode}
+            dailyBudget={input.dailyBudget}
+            audienceNodes={audienceNodes}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
         )}
 
         {activeTab === 'analyzer' && (
@@ -752,11 +896,11 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-white">
-                  Analisador de Métricas (Hook, Hold, CTR e Corte/Escala)
+                  Analisador de Métricas (Hook, Hold, CTR, Frequência e Corte/Escala)
                 </h2>
                 <p className="text-xs text-zinc-400">
                   Cole os números do Gerenciador após 72h+ para saber exatamente o que pausar,
-                  otimizar ou escalar (+20%).
+                  otimizar ou escalar (+20%). Alerta automático de fadiga quando Frequência Fria &gt; 3,5.
                 </p>
               </div>
               <button
@@ -791,6 +935,20 @@ export default function App() {
                         className="w-full max-w-md rounded bg-transparent text-sm font-semibold text-white outline-none focus:bg-zinc-950 focus:px-2"
                       />
                       <div className="flex items-center gap-2">
+                        <select
+                          value={ad.audienceTemp ?? 'cold'}
+                          onChange={(e) =>
+                            updateAd(
+                              ad.id,
+                              'audienceTemp',
+                              e.target.value === 'hot' ? 'hot' : 'cold'
+                            )
+                          }
+                          className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300 outline-none"
+                        >
+                          <option value="cold">Público Frio</option>
+                          <option value="hot">Remarketing Quente</option>
+                        </select>
                         <span
                           className={`rounded-full px-3 py-1 font-mono text-xs font-semibold ring-1 ${badgeStyles}`}
                         >
@@ -806,7 +964,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
                       {[
                         { label: 'Gasto (R$)', key: 'spend' as const },
                         { label: 'Impressões', key: 'impressions' as const },
@@ -815,6 +973,7 @@ export default function App() {
                         { label: 'Cliques Link', key: 'linkClicks' as const },
                         { label: 'Resultados', key: 'results' as const },
                         { label: 'Teto Alvo (R$)', key: 'targetCostPerResult' as const },
+                        { label: 'Frequência', key: 'frequency' as const },
                       ].map((f) => (
                         <div key={f.key}>
                           <label className="mb-1 block text-[11px] text-zinc-400">
@@ -823,7 +982,8 @@ export default function App() {
                           <input
                             type="number"
                             min={0}
-                            value={ad[f.key]}
+                            step={f.key === 'frequency' ? 0.1 : 1}
+                            value={ad[f.key] ?? (f.key === 'frequency' ? 1.4 : 0)}
                             onChange={(e) =>
                               updateAd(ad.id, f.key, Number(e.target.value) || 0)
                             }
@@ -835,7 +995,9 @@ export default function App() {
 
                     <div className="mt-4 grid grid-cols-2 gap-3 rounded-lg bg-zinc-950/70 p-3 sm:grid-cols-5">
                       <div>
-                        <div className="text-[10px] text-zinc-500">Hook Rate (≥25%)</div>
+                        <div className="text-[10px] text-zinc-500">
+                          <MetricTooltip termId="hook-rate" label="Hook Rate (≥25%)" />
+                        </div>
                         <div
                           className={`font-mono text-sm font-semibold ${
                             analysis.hookRate >= 25
@@ -849,7 +1011,9 @@ export default function App() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-zinc-500">Hold Rate (≥25%)</div>
+                        <div className="text-[10px] text-zinc-500">
+                          <MetricTooltip termId="hold-rate" label="Hold Rate (≥25%)" />
+                        </div>
                         <div
                           className={`font-mono text-sm font-semibold ${
                             analysis.holdRate >= 25 ? 'text-emerald-400' : 'text-amber-400'
@@ -859,24 +1023,37 @@ export default function App() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-zinc-500">CTR Link (≥1%)</div>
+                        <div className="text-[10px] text-zinc-500">
+                          <MetricTooltip termId="ctr" label="CTR Link (≥1%)" />
+                        </div>
                         <div className="font-mono text-sm font-semibold text-white">
                           {analysis.ctr.toFixed(2)}%
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-zinc-500">CPM</div>
+                        <div className="text-[10px] text-zinc-500">
+                          <MetricTooltip termId="cpm" label="CPM" />
+                        </div>
                         <div className="font-mono text-sm font-semibold text-white">
                           {formatBRL(analysis.cpm)}
                         </div>
                       </div>
                       <div>
-                        <div className="text-[10px] text-zinc-500">Custo / Resultado</div>
+                        <div className="text-[10px] text-zinc-500">
+                          <MetricTooltip termId="cpa" label="Custo / Resultado" />
+                        </div>
                         <div className="font-mono text-sm font-semibold text-white">
                           {analysis.cpr !== null ? formatBRL(analysis.cpr) : '—'}
                         </div>
                       </div>
                     </div>
+
+                    {analysis.frequencyAlert && (
+                      <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span>{analysis.frequencyAlert}</span>
+                      </div>
+                    )}
 
                     <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-300">
                       <div>
@@ -895,80 +1072,76 @@ export default function App() {
         )}
 
         {activeTab === 'playbooks' && (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-              <div className="flex items-center gap-2 text-emerald-400">
-                <Activity className="h-4 w-4" />
-                <h3 className="text-sm font-semibold text-white">
-                  O que mudou no Meta Ads (Pós-Andromeda 11/2026)
-                </h3>
-              </div>
-              <ul className="mt-3 space-y-2.5 text-xs leading-relaxed text-zinc-300">
-                <li>
-                  <strong>Andromeda:</strong> anúncios parecidos demais contam como um só.
-                  20 variações de texto do mesmo vídeo = 1 conceito. Varie ângulo, formato ou
-                  persona.
-                </li>
-                <li>
-                  <strong>O criativo faz a segmentação:</strong> Advantage+ Sales e público
-                  aberto são o padrão. Interesses viraram sugestão, não trava.
-                </li>
-                <li>
-                  <strong>ABO pra testar, CBO/Advantage+ pra escalar:</strong> leve vencedores
-                  pelo ID do post para manter prova social.
-                </li>
-                <li>
-                  <strong>Pixel + CAPI obrigatórios:</strong> sem API de Conversões com
-                  deduplicação, o algoritmo otimiza no escuro.
-                </li>
-              </ul>
-            </div>
+          <div className="space-y-8">
+            <KnowledgeCenterTab />
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
-              <div className="flex items-center gap-2 text-rose-400">
-                <AlertTriangle className="h-4 w-4" />
-                <h3 className="text-sm font-semibold text-white">
-                  Erros que queimam verba
-                </h3>
+            <div className="grid grid-cols-1 gap-5 border-t border-zinc-800 pt-6 md:grid-cols-2">
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <Activity className="h-4 w-4" />
+                  <h3 className="text-sm font-semibold text-white">
+                    O que mudou no Meta Ads (Pós-Andromeda 11/2026)
+                  </h3>
+                </div>
+                <ul className="mt-3 space-y-2.5 text-xs leading-relaxed text-zinc-300">
+                  <li>
+                    <strong>Andromeda:</strong> anúncios parecidos demais contam como um só.
+                    20 variações de texto do mesmo vídeo = 1 conceito. Varie ângulo, formato ou
+                    persona.
+                  </li>
+                  <li>
+                    <strong>O criativo faz a segmentação:</strong> Advantage+ Sales e público
+                    aberto são o padrão. Interesses viraram sugestão, não trava.
+                  </li>
+                  <li>
+                    <strong>ABO pra testar, CBO/Advantage+ pra escalar:</strong> leve vencedores
+                    pelo ID do post para manter prova social.
+                  </li>
+                  <li>
+                    <strong>Pixel + CAPI obrigatórios:</strong> sem API de Conversões com
+                    deduplicação, o algoritmo otimiza no escuro.
+                  </li>
+                </ul>
               </div>
-              <ul className="mt-3 space-y-2.5 text-xs leading-relaxed text-zinc-300">
-                <li>
-                  Muitos conjuntos que nunca chegam a ~50 eventos/semana (fragmentação).
-                </li>
-                <li>
-                  Mexer nas primeiras 72h ou dobrar o orçamento de uma vez (reinicia o
-                  aprendizado).
-                </li>
-                <li>
-                  Usar o botão &quot;Impulsionar&quot; do Instagram em vez do Gerenciador.
-                </li>
-                <li>
-                  Não excluir compradores/leads ou demorar para responder no WhatsApp.
-                </li>
-                <li>
-                  Matar criativo cedo demais (antes de 1–3× o CPA) ou tarde demais (sem teto).
-                </li>
-              </ul>
-            </div>
 
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5 md:col-span-2">
-              <h3 className="text-sm font-semibold text-white">
-                Integração opcional com Zernio (ads.py)
-              </h3>
-              <p className="mt-1 text-xs text-zinc-400">
-                Exporte o <code className="text-emerald-400">plano.json</code> no Planejador
-                para criar campanhas <strong>PAUSADAS</strong> via API oficial da Zernio:
-              </p>
-              <pre className="mt-3 overflow-x-auto rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-xs text-zinc-300">
-{`python3 scripts/ads.py contas
-python3 scripts/ads.py criar plano.json --simular
-python3 scripts/ads.py criar plano.json
-python3 scripts/ads.py metricas --conta ID --anuncio act_... --dias 7`}
-              </pre>
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-5">
+                <div className="flex items-center gap-2 text-rose-400">
+                  <AlertTriangle className="h-4 w-4" />
+                  <h3 className="text-sm font-semibold text-white">
+                    Erros que queimam verba
+                  </h3>
+                </div>
+                <ul className="mt-3 space-y-2.5 text-xs leading-relaxed text-zinc-300">
+                  <li>
+                    Muitos conjuntos que nunca chegam a ~50 eventos/semana (fragmentação).
+                  </li>
+                  <li>
+                    Mexer nas primeiras 72h ou dobrar o orçamento de uma vez (reinicia o
+                    aprendizado).
+                  </li>
+                  <li>
+                    Usar o botão &quot;Impulsionar&quot; do Instagram em vez do Gerenciador.
+                  </li>
+                  <li>
+                    Não excluir compradores/leads ou demorar para responder no WhatsApp.
+                  </li>
+                  <li>
+                    Matar criativo cedo demais (antes de 1–3× o CPA) ou tarde demais (sem teto).
+                  </li>
+                </ul>
+              </div>
             </div>
           </div>
         )}
       </main>
+
+      <ZernioSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onUpdated={() => {
+          void refreshRuntime();
+        }}
+      />
     </div>
   );
 }

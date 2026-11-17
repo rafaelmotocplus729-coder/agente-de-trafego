@@ -459,6 +459,8 @@ export interface AdMetricInput {
   linkClicks: number;
   results: number;
   targetCostPerResult: number;
+  frequency?: number;
+  audienceTemp?: 'cold' | 'hot';
 }
 
 export interface AdAnalysis {
@@ -467,10 +469,55 @@ export interface AdAnalysis {
   ctr: number;
   cpm: number;
   cpr: number | null;
+  frequencyAlert: string | null;
   verdict: 'ESCALAR' | 'MANTER' | 'PAUSAR' | 'OTIMIZAR';
   badgeColor: 'emerald' | 'amber' | 'rose' | 'sky';
   reason: string;
   nextAction: string;
+}
+
+export interface AuctionScoreResult {
+  totalValueScore: number;
+  bidContribution: number;
+  estimatedActionContribution: number;
+  qualityContribution: number;
+  competitivenessLabel: 'ALTA (Vence com menor orçamento)' | 'MODERADA' | 'BAIXA (Paga CPM caro)';
+  guidance: string;
+}
+
+export function evaluateAuctionValue(params: {
+  dailyBudget: number;
+  hookRatePct: number;
+  ctrPct: number;
+  holdRatePct: number;
+}): AuctionScoreResult {
+  const bidContribution = Math.min(40, Math.round((params.dailyBudget / 200) * 30 + 10));
+  const estimatedActionContribution = Math.min(35, Math.round(params.ctrPct * 16 + params.holdRatePct * 0.3));
+  const qualityContribution = Math.min(35, Math.round(params.hookRatePct * 0.7 + params.ctrPct * 8));
+  const totalValueScore = Math.min(100, bidContribution + estimatedActionContribution + qualityContribution);
+
+  const competitivenessLabel =
+    totalValueScore >= 72
+      ? 'ALTA (Vence com menor orçamento)'
+      : totalValueScore >= 48
+        ? 'MODERADA'
+        : 'BAIXA (Paga CPM caro)';
+
+  const guidance =
+    totalValueScore >= 72
+      ? 'Criativo autêntico com retenção e CTR elevados: sua pontuação de qualidade compensa orçamentos diários menores no leilão.'
+      : totalValueScore >= 48
+        ? 'Competitividade média. Elevar o Hook Rate acima de 25% e CTR acima de 1,2% reduz o CPM sem precisar aumentar o lance.'
+        : 'Atenção: qualidade/retenção baixa encarece o leilão. Regrave os 3s iniciais antes de subir verba.';
+
+  return {
+    totalValueScore,
+    bidContribution,
+    estimatedActionContribution,
+    qualityContribution,
+    competitivenessLabel,
+    guidance,
+  };
 }
 
 export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
@@ -479,6 +526,15 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
   const ctr = ad.impressions > 0 ? (ad.linkClicks / ad.impressions) * 100 : 0;
   const cpm = ad.impressions > 0 ? (ad.spend / ad.impressions) * 1000 : 0;
   const cpr = ad.results > 0 ? ad.spend / ad.results : null;
+  const freq = ad.frequency ?? 1.4;
+  const temp = ad.audienceTemp ?? 'cold';
+
+  const frequencyAlert =
+    temp === 'cold' && freq > 3.5
+      ? `Fadiga detectada: Frequência de ${freq.toFixed(1)} (> 3,5 em público frio). Rotacione novos ganchos/conceitos.`
+      : temp === 'hot' && freq > 6.5
+        ? `Saturação em remarketing (${freq.toFixed(1)}). Renove o criativo ou amplie janela.`
+        : null;
 
   const cutCeiling = ad.targetCostPerResult * 2;
 
@@ -489,6 +545,7 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
       ctr,
       cpm,
       cpr,
+      frequencyAlert,
       verdict: 'PAUSAR',
       badgeColor: 'rose',
       reason: `Gastou ${formatBRL(ad.spend)} (≥ 2× o teto de ${formatBRL(ad.targetCostPerResult)}) sem nenhum resultado.`,
@@ -506,6 +563,7 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
       ctr,
       cpm,
       cpr,
+      frequencyAlert,
       verdict: 'PAUSAR',
       badgeColor: 'rose',
       reason: `Custo por resultado (${formatBRL(cpr)}) está acima do teto alvo (${formatBRL(ad.targetCostPerResult)}).`,
@@ -523,10 +581,11 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
       ctr,
       cpm,
       cpr,
+      frequencyAlert,
       verdict: 'ESCALAR',
       badgeColor: 'emerald',
       reason: `Vencedor validado: ${ad.results} resultados a ${formatBRL(cpr)} (≤ alvo ${formatBRL(ad.targetCostPerResult)}).`,
-      nextAction: 'Levar pelo ID do post para Escala ou subir +20% de orçamento a cada 3–4 dias. Criar 3 variações de gancho deste vencedor.',
+      nextAction: 'Levar pelo ID do post para Escala ou subir +20% de orçamento a cada 3–4 dias (sistema de centavos .03/.05). Criar 3 variações de gancho deste vencedor.',
     };
   }
 
@@ -537,6 +596,7 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
       ctr,
       cpm,
       cpr,
+      frequencyAlert,
       verdict: 'OTIMIZAR',
       badgeColor: 'amber',
       reason: `Hook Rate de ${hookRate.toFixed(1)}% está abaixo de 20% — pouca gente para nos 3 primeiros segundos.`,
@@ -550,6 +610,7 @@ export function analyzeAdMetrics(ad: AdMetricInput): AdAnalysis {
     ctr,
     cpm,
     cpr,
+    frequencyAlert,
     verdict: 'MANTER',
     badgeColor: 'sky',
     reason:
